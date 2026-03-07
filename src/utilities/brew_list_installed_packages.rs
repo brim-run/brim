@@ -19,7 +19,7 @@ pub fn list_installed_packages() -> Vec<BrewPackage> {
                     url: None,
                     cask: None,
                     version: None,
-                }) // Convert &str to String
+                })
                 .collect();
 
             result

@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::models::BrewPackage;
-    use crate::webhook::{PackageResult, WebhookPayload};
+    use brim::models::BrewPackage;
+    use brim::models::BrewPackageResult;
+    use brim::webhook::WebhookPayload;
 
     #[test]
     fn test_brew_package_deserialization() {
@@ -13,7 +14,7 @@ mod tests {
 
         let package: Result<BrewPackage, _> = serde_json::from_str(json);
         assert!(package.is_ok());
-        
+
         let package = package.unwrap();
         assert_eq!(package.name, "postgresql");
         assert_eq!(package.category, Some("Database".to_string()));
@@ -36,11 +37,11 @@ mod tests {
     #[test]
     fn test_webhook_payload_success() {
         let packages = vec![
-            PackageResult {
+            BrewPackageResult {
                 name: "postgresql".to_string(),
                 status: "completed".to_string(),
             },
-            PackageResult {
+            BrewPackageResult {
                 name: "redis".to_string(),
                 status: "completed".to_string(),
             },
@@ -64,11 +65,11 @@ mod tests {
     #[test]
     fn test_webhook_payload_partial() {
         let packages = vec![
-            PackageResult {
+            BrewPackageResult {
                 name: "postgresql".to_string(),
                 status: "completed".to_string(),
             },
-            PackageResult {
+            BrewPackageResult {
                 name: "redis".to_string(),
                 status: "failed".to_string(),
             },
@@ -91,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_package_result_creation() {
-        let result = PackageResult {
+        let result = BrewPackageResult {
             name: "test-package".to_string(),
             status: "completed".to_string(),
         };

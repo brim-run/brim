@@ -1,18 +1,61 @@
 use crate::constants::PROGRAM;
 use crate::models::BrewPackage;
+use crate::models::BrewPackageResult;
 use crate::tui::{ProgressState, ProgressTracker};
-use crate::webhook::PackageResult;
-use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
-pub fn remove_packages(packages: &[BrewPackage], _parallel: bool) -> Vec<PackageResult> {
+/// Shared per-package removal: brew remove -f then autoremove on success. Used by headless and TUI.
+fn remove_one_package(package: &BrewPackage) -> BrewPackageResult {
+    let spec = super::brew_common::brew_package_spec(package);
+    let status = match Command::new(PROGRAM)
+        .arg("remove")
+        .arg("-f")
+        .arg(&spec)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .status()
+    {
+        Ok(s) => s,
+        Err(e) => {
+            return BrewPackageResult {
+                name: package.name.clone(),
+                status: format!("failed: {}", e),
+            };
+        }
+    };
+    if status.success() {
+        let _ = Command::new(PROGRAM)
+            .arg("autoremove")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        BrewPackageResult {
+            name: package.name.clone(),
+            status: "completed".to_string(),
+        }
+    } else {
+        BrewPackageResult {
+            name: package.name.clone(),
+            status: "failed".to_string(),
+        }
+    }
+}
+
+/// Removes packages without TUI (headless). Suitable for MCP and scripts.
+pub fn remove_packages_headless(packages: &[BrewPackage]) -> Vec<BrewPackageResult> {
+    packages.iter().map(remove_one_package).collect()
+}
+
+pub fn remove_packages(packages: &[BrewPackage], _parallel: bool) -> Vec<BrewPackageResult> {
     let package_names: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
 
-    let mut tracker = match ProgressTracker::new(package_names) {
+    let mut tracker = match ProgressTracker::new(package_names, None) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("Failed to initialize TUI: {}", e);
@@ -27,196 +70,51 @@ pub fn remove_packages(packages: &[BrewPackage], _parallel: bool) -> Vec<Package
 
     let remove_threads: Vec<_> = {
         let packages = packages_arc.lock().unwrap();
-        
-        packages.iter().enumerate().map(|(index, package)| {
-            let package = package.clone();
-            let tracker_packages = Arc::clone(&tracker_packages);
-            let cancelled = Arc::clone(&cancelled);
-            
-            thread::spawn(move || {
-                if cancelled.load(Ordering::Relaxed) {
-                    return;
-                }
-                
-                if let Ok(mut tracked) = tracker_packages.lock() {
-                    if let Some(p) = tracked.get_mut(index) {
-                        p.state = ProgressState::Removing;
-                        p.progress = 10;
-                        p.message = "Removing...".to_string();
-                    }
-                }
 
-                thread::sleep(Duration::from_millis(200));
+        packages
+            .iter()
+            .enumerate()
+            .map(|(index, package)| {
+                let package = package.clone();
+                let tracker_packages = Arc::clone(&tracker_packages);
 
-                let mut command = Command::new(PROGRAM);
-                command
-                    .arg("remove")
-                    .arg("-f")
-                    .arg(&package.name)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-
-                let mut child = match command.spawn() {
-                    Ok(c) => c,
-                    Err(e) => {
-                        if let Ok(mut tracked) = tracker_packages.lock() {
-                            if let Some(p) = tracked.get_mut(index) {
-                                p.state = ProgressState::Failed;
-                                p.progress = 0;
-                                p.message = format!("Error: {}", e);
-                            }
-                        }
-                        return;
-                    }
-                };
-
-                let stdout = child.stdout.take().unwrap();
-                let stderr = child.stderr.take().unwrap();
-                let tracker_packages_clone = Arc::clone(&tracker_packages);
-                
-                let stdout_thread = thread::spawn(move || {
-                    let reader = BufReader::new(stdout);
-                    for line in reader.lines().map_while(Result::ok) {
-                        if let Ok(mut tracked) = tracker_packages_clone.try_lock() {
-                                if let Some(p) = tracked.get_mut(index) {
-                                    p.progress = 50;
-                                    if !line.trim().is_empty() && line.len() < 50 {
-                                        p.message = line.trim().to_string();
-                                    }
-                                }
-                            }
-                        }
-                });
-
-                let tracker_packages_clone = Arc::clone(&tracker_packages);
-                let stderr_thread = thread::spawn(move || {
-                    let reader = BufReader::new(stderr);
-                    for line in reader.lines().map_while(Result::ok) {
-                        if !line.trim().is_empty() && line.len() < 50 {
-                                if let Ok(mut tracked) = tracker_packages_clone.try_lock() {
-                                    if let Some(p) = tracked.get_mut(index) {
-                                        p.message = line.trim().to_string();
-                                    }
-                                }
-                            }
-                        }
-                });
-
-                #[allow(unused_assignments)]
-                let mut status = None;
-                let mut wait_count = 0;
-                loop {
-                    if cancelled.load(Ordering::Relaxed) {
-                        let _ = child.kill();
-                        status = Some(Err(std::io::Error::new(
-                            std::io::ErrorKind::Interrupted,
-                            "Cancelled by user",
-                        )));
-                        break;
-                    }
-                    
-                    match child.try_wait() {
-                        Ok(Some(exit_status)) => {
-                            status = Some(Ok(exit_status));
-                            break;
-                        }
-                        Ok(None) => {
-                            wait_count += 1;
-                            if wait_count > 1200 {
-                                let _ = child.kill();
-                                status = Some(Err(std::io::Error::new(
-                                    std::io::ErrorKind::TimedOut,
-                                    "Removal timed out after 2 minutes",
-                                )));
-                                break;
-                            }
-                            thread::sleep(Duration::from_millis(100));
-                        }
-                        Err(e) => {
-                            status = Some(Err(e));
-                            break;
+                thread::spawn(move || {
+                    if let Ok(mut tracked) = tracker_packages.lock() {
+                        if let Some(p) = tracked.get_mut(index) {
+                            p.state = ProgressState::Removing;
+                            p.progress = 10;
+                            p.message = "Removing...".to_string();
                         }
                     }
-                }
-                
-                let _ = stdout_thread.join();
-                let _ = stderr_thread.join();
-                
-                let status = status.unwrap();
 
-                match status {
-                    Ok(exit_status) if exit_status.success() => {
-                        if let Ok(mut tracked) = tracker_packages.lock() {
-                            if let Some(p) = tracked.get_mut(index) {
-                                p.progress = 70;
-                                p.message = "Cleaning dependencies...".to_string();
-                            }
-                        }
+                    thread::sleep(Duration::from_millis(200));
 
-                        let mut auto_cmd = Command::new(PROGRAM);
-                        auto_cmd
-                            .arg("autoremove")
-                            .stdin(Stdio::null())
-                            .stdout(Stdio::piped())
-                            .stderr(Stdio::piped());
+                    let result = remove_one_package(&package);
 
-                        if let Ok(mut auto_child) = auto_cmd.spawn() {
-                            let mut auto_wait_count = 0;
-                            loop {
-                                match auto_child.try_wait() {
-                                    Ok(Some(_)) => break,
-                                    Ok(None) => {
-                                        auto_wait_count += 1;
-                                        if auto_wait_count > 600 {
-                                            let _ = auto_child.kill();
-                                            break;
-                                        }
-                                        thread::sleep(Duration::from_millis(100));
-                                    }
-                                    Err(_) => break,
-                                }
-                            }
-                        }
-
-                        if let Ok(mut tracked) = tracker_packages.lock() {
-                            if let Some(p) = tracked.get_mut(index) {
+                    if let Ok(mut tracked) = tracker_packages.lock() {
+                        if let Some(p) = tracked.get_mut(index) {
+                            if result.status == "completed" {
                                 p.state = ProgressState::Completed;
                                 p.progress = 100;
                                 p.message = "Removed!".to_string();
-                            }
-                        }
-                    }
-                    Ok(_) => {
-                        if let Ok(mut tracked) = tracker_packages.lock() {
-                            if let Some(p) = tracked.get_mut(index) {
+                            } else {
                                 p.state = ProgressState::Failed;
                                 p.progress = 0;
-                                p.message = "Removal failed".to_string();
+                                p.message = result.status.clone();
                             }
                         }
                     }
-                    Err(e) => {
-                        if let Ok(mut tracked) = tracker_packages.lock() {
-                            if let Some(p) = tracked.get_mut(index) {
-                                p.state = ProgressState::Failed;
-                                p.progress = 0;
-                                p.message = format!("Error: {}", e);
-                            }
-                        }
-                    }
-                }
 
-                thread::sleep(Duration::from_millis(100));
+                    thread::sleep(Duration::from_millis(100));
+                })
             })
-        }).collect()
+            .collect()
     };
 
     let cancelled_clone = Arc::clone(&cancelled);
-    let removal_completed = tracker.run_with_updates(|| {
-        remove_threads.iter().all(|t| t.is_finished())
-    });
-    
+    let removal_completed =
+        tracker.run_with_updates(|| remove_threads.iter().all(|t| t.is_finished()));
+
     if removal_completed.is_err() || !removal_completed.unwrap_or(true) {
         cancelled_clone.store(true, Ordering::Relaxed);
         thread::sleep(Duration::from_millis(200));
@@ -225,13 +123,16 @@ pub fn remove_packages(packages: &[BrewPackage], _parallel: bool) -> Vec<Package
     for thread in remove_threads {
         let _ = thread.join();
     }
-    
+
     let guard = tracker_packages_for_result.lock();
     if let Ok(packages) = guard {
-        packages.iter().map(|p| PackageResult {
-            name: p.name.clone(),
-            status: p.state_label().to_string(),
-        }).collect()
+        packages
+            .iter()
+            .map(|p| BrewPackageResult {
+                name: p.name.clone(),
+                status: p.state_label().to_string(),
+            })
+            .collect()
     } else {
         vec![]
     }

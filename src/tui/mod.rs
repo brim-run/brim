@@ -1,3 +1,3 @@
 pub mod progress;
 
-pub use progress::{ProgressTracker, ProgressState};
+pub use progress::{ProgressState, ProgressTracker};

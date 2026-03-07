@@ -93,7 +93,7 @@ download_and_install() {
         exit 1
     fi
     
-    print_info "Extracting binary..."
+    print_info "Extracting..."
     tar -xzf "$tmp_dir/$asset" -C "$tmp_dir"
     
     mkdir -p "$INSTALL_DIR"
@@ -105,9 +105,15 @@ download_and_install() {
     mv "$tmp_dir/brim" "$INSTALL_DIR/brim"
     chmod +x "$INSTALL_DIR/brim"
     
-    rm -rf "$tmp_dir"
+    if [ -f "$tmp_dir/brim-mcp" ]; then
+        mv "$tmp_dir/brim-mcp" "$INSTALL_DIR/brim-mcp"
+        chmod +x "$INSTALL_DIR/brim-mcp"
+        print_success "BRIM and brim-mcp installed to $INSTALL_DIR"
+    else
+        print_success "BRIM installed to $INSTALL_DIR/brim"
+    fi
     
-    print_success "BRIM installed to $INSTALL_DIR/brim"
+    rm -rf "$tmp_dir"
 }
 
 verify_installation() {
@@ -133,6 +139,9 @@ verify_installation() {
         echo ""
     else
         print_success "BRIM is ready to use!"
+        if [ -f "$INSTALL_DIR/brim-mcp" ]; then
+            print_info "brim-mcp is available for MCP (Cursor/Claude). Add it in your MCP client config."
+        fi
         echo ""
         "$INSTALL_DIR/brim" --help
     fi

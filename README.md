@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/alexandrughinea/brim/main/install.s
 This will:
 - Detect your platform automatically (x86_64/ARM64, macOS/Linux)
 - Download the latest release binary
-- Install to `~/.local/bin/brim`
+- Install `brim` (and `brim-mcp` for MCP) to `~/.local/bin`
 - Set up PATH if needed
 
 ### Manual Installation
@@ -46,6 +46,8 @@ Download pre-built binaries from the [releases page](https://github.com/alexandr
 # Extract and install
 tar -xzf brim-*.tar.gz
 sudo mv brim /usr/local/bin/
+# Newer releases also include brim-mcp for MCP; if present:
+# sudo mv brim-mcp /usr/local/bin/
 ```
 
 ### Build from Source
@@ -84,6 +86,7 @@ brim [OPTIONS]
 | `--parallel` | Flag | Enable parallel downloads (sequential install) | `--parallel` |
 | `--dry-run` | Flag | Preview changes without installing or removing packages | `--dry-run` |
 | `--webhook <URL>` | String | Webhook URL to POST installation summary (optional) | `--webhook="https://example.com/hook"` |
+| `--autoquit <SECONDS>` | Number | Auto-quit summary screen after N seconds (after install) | `--autoquit 10` |
 | `-h, --help` | Flag | Print help information | `--help` |
 
 ### Usage Examples
@@ -116,6 +119,9 @@ brim --url="base.json" --url="extras.json" --dry-run
 # Install with webhook notification
 brim --url="packages.json" --webhook="https://hooks.example.com/notify"
 
+# Install and auto-quit summary screen after 10 seconds
+brim --url="packages.json" --autoquit 10
+
 # List installed packages
 brim --list
 
@@ -128,6 +134,124 @@ brim --sync --url="base.json,dev-tools.json"
 # Remove packages (with preview option)
 brim --remove --dry-run
 ```
+
+### Library API (headless / programmatic use)
+
+BRIM exposes a Rust library so other applications and scripts can call the same logic without the interactive TUI. Add `brim` as a dependency and use the API below. All functions that run `brew` require a normal terminal environment (e.g. `brew` on `PATH`).
+
+**Add to `Cargo.toml`:**
+```toml
+[dependencies]
+brim = { path = "/path/to/brim" }
+# or from crates.io when published:
+# brim = "0.2"
+```
+
+**MCP (Model Context Protocol)**
+
+BRIM runs as an [MCP](https://modelcontextprotocol.io/) server so AI assistants and other MCP clients can drive it via tools. The server binary is **`brim-mcp`** and uses **stdio** (JSON-RPC on stdin/stdout).
+
+**Build and run:**
+```bash
+cargo build --features mcp --bin brim-mcp
+# or install
+cargo install --path . --features mcp --bin brim-mcp
+```
+
+**Tools:**
+
+| Tool | Description |
+|------|-------------|
+| **validate_recipe** | Validate a recipe JSON string. Argument: raw JSON array of packages. |
+| **list_recipe_packages** | Fetch and merge recipe file(s) from URLs or paths. Argument: JSON array of URL/path strings. Returns merged package list as JSON. |
+| **sync_analysis_tool** | Compare recipe (from URLs) with installed packages. Argument: JSON array of recipe URLs. Returns JSON with `to_install`, `to_remove`, `in_sync`. |
+| **install** | Install packages from recipe file(s) without UI. Arguments: `urls_json` (JSON array of recipe URLs), `parallel` (bool), optional `webhook_url` (POST install summary JSON, same as CLI `--webhook`). Returns JSON array of `{ name, status }` per package. |
+
+These tools are exposed to MCP clients when you run `brim-mcp` with **no arguments** (stdio server). The same install logic is also available as a one-shot CLI for scripts or hosts that invoke by command: `brim-mcp install --urls recipe.json` (see **One-shot CLI** below).
+
+**How Cursor or Claude discover brim-mcp**
+
+MCP servers are not discovered automatically. You add `brim-mcp` in your client config and set `command` to the full path of the `brim-mcp` binary. Restart the app after changing config.
+
+Example MCP config (paste into your client's config file):
+
+```json
+{
+  "mcpServers": {
+    "brim": {
+      "command": "brim-mcp"
+    }
+  }
+}
+```
+
+Use `"command": "/absolute/path/to/brim-mcp"` if the binary is not on PATH (e.g. `~/.local/bin/brim-mcp` or `~/.cargo/bin/brim-mcp`).
+
+- **If you used the install script:** `brim-mcp` is in the same directory as `brim`, e.g. `~/.local/bin/brim-mcp`. Use that path if it’s not on PATH.
+- **If you used `cargo install ... --bin brim-mcp`:** the binary is usually `~/.cargo/bin/brim-mcp`. Ensure that directory is on your PATH so the client can run it.
+- **If you built locally:** use the path to the binary, e.g. `./target/release/brim-mcp`.
+
+**Cursor** — add the server in one of these ways:
+- **Settings → Tools & MCP → Add new MCP server:** set type to **command** and command to the path above (e.g. `brim-mcp` if it’s on PATH, or `/absolute/path/to/brim-mcp`).
+- **Config file:** create or edit `~/.cursor/mcp.json` (global) or `.cursor/mcp.json` (project) and paste the JSON above.
+
+**Claude Desktop** — edit the MCP config (e.g. **Settings → Developer → Edit Config**). Config file location:
+- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
+- **Linux:** `~/.config/Claude/claude_desktop_config.json`
+- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
+
+Add the same `mcpServers` block as in the example above (or merge it into your existing config). Restart Claude Desktop after saving.
+
+**One-shot CLI (for scripts and other MCP servers)**
+
+To run the same install logic without starting the stdio server (e.g. from another MCP server or a script), use the `install` subcommand:
+
+```bash
+brim-mcp install --urls /path/to/recipe.json
+# or multiple recipes
+brim-mcp install -u recipe1.json -u recipe2.json
+# optional: --parallel false
+```
+
+This uses the same code path as the MCP `install` tool and is exposed to MCP clients both via the stdio server (tools) and via command invocation.
+
+**Library usage (Rust)**
+
+You can also use the crate directly. Example (headless install from a recipe URL):
+```rust
+use brim::{fetch_packages, install_packages_headless, FetchError};
+
+#[tokio::main]
+async fn main() -> Result<(), FetchError> {
+    let packages = fetch_packages("https://example.com/recipe.json").await?;
+    let results = install_packages_headless(&packages, true);
+    for r in &results {
+        println!("{}: {}", r.name, r.status);
+    }
+    Ok(())
+}
+```
+
+**Example (validate + sync analysis):**
+```rust
+use brim::{fetch_and_merge_packages, list_installed_packages, sync_analysis};
+
+#[tokio::main]
+async fn main() {
+    let urls = vec!["packages.json".to_string()];
+    match fetch_and_merge_packages(&urls).await {
+        Ok(recipe) => {
+            let installed = list_installed_packages();
+            let report = sync_analysis(&recipe, &installed);
+            println!("To install: {}, to remove: {}, in sync: {}",
+                report.to_install.len(), report.to_remove.len(), report.in_sync.len());
+        }
+        Err(e) => eprintln!("Fetch failed: {}", e),
+    }
+}
+```
+
+The CLI binary is built from the same library; interactive installs use the TUI, while the library and MCP server expose headless operations for other processes.
 
 ## Recipe Chaining
 
@@ -281,6 +405,8 @@ A JSON schema is available at `recipe-schema.json` for IDE validation and autoco
 | `Enter` | Confirm selection and proceed |
 | `q` | Quit (after completion) |
 | `ESC` | Force quit immediately |
+
+With `--autoquit <SECONDS>`, the summary screen shows a countdown and exits automatically after the given number of seconds (e.g. `--autoquit 10`).
 
 ## Performance Modes
 

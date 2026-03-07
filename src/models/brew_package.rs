@@ -1,6 +1,6 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BrewPackage {
     pub name: String,
     pub category: Option<String>,
@@ -8,5 +8,5 @@ pub struct BrewPackage {
     pub url: Option<String>,
     pub cask: Option<bool>,
     #[allow(dead_code)]
-    pub version: Option<String>
+    pub version: Option<String>,
 }
