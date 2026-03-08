@@ -1,21 +1,16 @@
-//! BRIM MCP server and one-shot CLI.
+//! BRIM MCP server — stdio.
 //!
-//! **Exposed to MCP clients (Cursor, Claude, etc.):**
-//! - Run with **no arguments** to start the stdio MCP server. Clients discover and call tools
-//!   (`install`, `list_recipe_packages`, `sync_analysis_tool`, `validate_recipe`, `update_recipe_lock`, `remove`)
-//!   via JSON-RPC on stdin/stdout. Configure your MCP client with `"command": "brim-mcp"`.
+//! Run with no arguments to start the MCP server. Clients discover and call tools via JSON-RPC
+//! on stdin/stdout. Configure your client with `"command": "brim-mcp"`.
 //!
-//! **Exposed to other tools / scripts:**
-//! - Run with the **`install` subcommand** for a one-shot install (same logic as the MCP `install` tool).
-//!   Use this when another MCP server or script invokes brim-mcp as a command, e.g.:
-//!   `brim-mcp install --urls recipe.json`
+//! For scripted/CI use without an MCP client, use the `brim` headless subcommands instead:
+//! `brim install`, `brim sync`, `brim remove`, `brim update-lock`.
 
 use brim::{
-    fetch_and_merge_packages, install_packages_headless, list_installed_packages, remove_packages_headless,
-    sync_analysis, update_lock, validate_recipe_json, verify_or_update_lock, webhook, BrewPackage,
-    BrewPackageResult, Recipe,
+    fetch_and_merge_packages, install_packages_headless, list_installed_packages,
+    remove_packages_headless, sync_analysis, update_lock, validate_recipe_json,
+    verify_or_update_lock, webhook, BrewPackage, BrewPackageResult, Recipe,
 };
-use clap::{Arg, ArgMatches, Command};
 use model_context_protocol::macros::mcp_server;
 use model_context_protocol::server::stdio::McpStdioServer;
 use model_context_protocol::{MacroServerAdapter, McpServerConfig};
@@ -35,8 +30,7 @@ impl BrimMcpServer {
         urls_json: String,
     ) -> Result<String, String> {
         let urls = parse_urls_json(&urls_json)?;
-        let packages = fetch_recipe(&urls)?;
-        update_lock(&packages, &urls).map_err(|e| e.to_string())?;
+        do_update_lock(&urls)?;
         Ok("Recipe lock updated. You can retry the previous operation.".to_string())
     }
 
@@ -79,7 +73,7 @@ impl BrimMcpServer {
     }
 
     #[mcp_tool(
-        description = "Install packages from recipe file(s) without interactive UI. Pass urls_json (JSON array of recipe URLs), parallel (true/false), and optionally webhook_url to POST a JSON summary after install. Fails if recipe changed since last run; use update_recipe_lock to accept and retry."
+        description = "Install packages from recipe file(s) without interactive UI. Pass urls_json (JSON array of recipe URLs), parallel (true/false), and optionally webhook_url to POST a JSON summary after install. Optional webhook_machine_id is sent in the payload (default: hostname or \"unknown\"). Fails if recipe changed since last run; use update_recipe_lock to accept and retry."
     )]
     pub fn install(
         &self,
@@ -87,6 +81,8 @@ impl BrimMcpServer {
         #[param("Use parallel fetch then sequential install")] parallel: bool,
         #[param("Optional webhook URL to POST install summary (empty to skip)")]
         webhook_url: String,
+        #[param("Optional machine ID for webhook payload (empty = default: hostname or \"unknown\")")]
+        webhook_machine_id: String,
     ) -> Result<String, String> {
         let urls = parse_urls_json(&urls_json)?;
         let start = Instant::now();
@@ -97,6 +93,12 @@ impl BrimMcpServer {
         if !webhook_url.is_empty() {
             let completed = results.iter().filter(|r| r.status == "completed").count();
             let failed = results.iter().filter(|r| r.status == "failed").count();
+            let machine_id = webhook_machine_id.trim();
+            let machine_id = if machine_id.is_empty() {
+                webhook::default_machine_id()
+            } else {
+                machine_id.to_string()
+            };
             let payload = webhook::WebhookPayload {
                 status: if failed > 0 {
                     "partial".to_string()
@@ -108,6 +110,7 @@ impl BrimMcpServer {
                 failed,
                 packages: results,
                 elapsed_seconds: start.elapsed().as_secs(),
+                machine_id,
             };
             if let Err(e) = tokio::task::block_in_place(|| {
                 tokio::runtime::Handle::current()
@@ -153,7 +156,7 @@ fn parse_urls_json(urls_json: &str) -> Result<Vec<String>, String> {
         .map_err(|e| format!("Invalid JSON array of URLs: {}", e))
 }
 
-/// Shared: fetch recipe only (no lock check). Used by fetch_recipe_verified and update_recipe_lock.
+/// Fetch recipe (no lock check). Used by fetch_recipe_verified and update_recipe_lock.
 fn fetch_recipe(urls: &[String]) -> Result<Recipe, String> {
     tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current().block_on(fetch_and_merge_packages(urls))
@@ -161,7 +164,7 @@ fn fetch_recipe(urls: &[String]) -> Result<Recipe, String> {
     .map_err(|e| e.to_string())
 }
 
-/// Shared: fetch recipe and verify lock. Used by list_recipe_packages, sync_analysis_tool, and do_install.
+/// Fetch recipe and verify lock. Used by list_recipe_packages, sync_analysis_tool, and do_install.
 fn fetch_recipe_verified(urls: &[String]) -> Result<Recipe, String> {
     let packages = fetch_recipe(urls)?;
     verify_or_update_lock(&packages, urls).map_err(|e| {
@@ -173,167 +176,28 @@ fn fetch_recipe_verified(urls: &[String]) -> Result<Recipe, String> {
     Ok(packages)
 }
 
-/// Shared install path: fetch recipe, verify lock, run headless install. Used by MCP tool and CLI.
+/// Fetch recipe, verify lock, run headless install. Used by the install MCP tool.
 fn do_install(urls: &[String], parallel: bool) -> Result<Vec<BrewPackageResult>, String> {
     let packages = fetch_recipe_verified(urls)?;
     Ok(install_packages_headless(&packages, parallel))
 }
 
-fn run_install(urls: &[String], parallel: bool) -> Result<(), String> {
-    let start = Instant::now();
-    let results = do_install(urls, parallel)?;
-    for r in &results {
-        println!("  {}: {}", r.name, r.status);
-    }
-    println!(
-        "Done in {}s ({} completed, {} failed).",
-        start.elapsed().as_secs(),
-        results.iter().filter(|r| r.status == "completed").count(),
-        results.iter().filter(|r| r.status == "failed").count()
-    );
-    Ok(())
-}
-
-/// Sync flow: same as sync_analysis_tool, human-readable CLI output.
-fn run_sync(urls: &[String]) -> Result<(), String> {
-    let recipe = fetch_recipe_verified(urls)?;
-    let installed = list_installed_packages();
-    let report = sync_analysis(&recipe, &installed);
-    println!("Sync analysis (recipe vs installed):");
-    println!("  To install:  {} (not in system)", report.to_install.len());
-    println!("  To remove:   {} (not in recipe)", report.to_remove.len());
-    println!("  In sync:    {}", report.in_sync.len());
-    if !report.to_install.is_empty() {
-        println!("  Missing:    {}", report.to_install.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
-    }
-    if !report.to_remove.is_empty() {
-        println!("  Extra:      {}", report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
-    }
-    Ok(())
-}
-
-/// Remove flow: remove packages not in recipe (to_remove from sync). Same list as sync_analysis_tool's to_remove.
-fn run_remove(urls: &[String]) -> Result<(), String> {
-    let recipe = fetch_recipe_verified(urls)?;
-    let installed = list_installed_packages();
-    let report = sync_analysis(&recipe, &installed);
-    if report.to_remove.is_empty() {
-        println!("Nothing to remove (all installed packages are in the recipe).");
-        return Ok(());
-    }
-    println!("Removing {} package(s) not in recipe: {}", report.to_remove.len(), report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "));
-    let start = Instant::now();
-    let results = remove_packages_headless(&report.to_remove);
-    for r in &results {
-        println!("  {}: {}", r.name, r.status);
-    }
-    println!(
-        "Done in {}s ({} completed, {} failed).",
-        start.elapsed().as_secs(),
-        results.iter().filter(|r| r.status == "completed").count(),
-        results.iter().filter(|r| r.status == "failed").count()
-    );
-    Ok(())
+/// Fetch recipe and update lockfile. Used by the update_recipe_lock MCP tool.
+fn do_update_lock(urls: &[String]) -> Result<usize, String> {
+    let packages = fetch_recipe(urls)?;
+    let n = packages.len();
+    update_lock(&packages, urls).map_err(|e| e.to_string())?;
+    Ok(n)
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let matches = Command::new("brim-mcp")
-        .about("BRIM MCP server (stdio). Use 'install' subcommand for one-shot install from recipe.")
-        .subcommand_required(false)
-        .arg_required_else_help(false)
-        .subcommand(
-            Command::new("install")
-                .about("Install packages from recipe URL(s) or path(s). Same logic as MCP install tool.")
-                .arg(
-                    Arg::new("urls")
-                        .short('u')
-                        .long("urls")
-                        .value_delimiter(',')
-                        .num_args(1..)
-                        .required(true)
-                        .help("Recipe URL(s) or file path(s)"),
-                )
-                .arg(
-                    Arg::new("parallel")
-                        .short('p')
-                        .long("parallel")
-                        .action(clap::ArgAction::Set)
-                        .default_value("true")
-                        .help("Use parallel fetch then sequential install (default: true)"),
-                ),
-        )
-        .subcommand(
-            Command::new("sync")
-                .about("Sync analysis: compare recipe with installed packages. Same logic as MCP sync_analysis_tool.")
-                .arg(
-                    Arg::new("urls")
-                        .short('u')
-                        .long("urls")
-                        .value_delimiter(',')
-                        .num_args(1..)
-                        .required(true)
-                        .help("Recipe URL(s) or file path(s)"),
-                ),
-        )
-        .subcommand(
-            Command::new("remove")
-                .about("Remove packages not in recipe (extras). Same as MCP: sync_analysis then remove to_remove.")
-                .arg(
-                    Arg::new("urls")
-                        .short('u')
-                        .long("urls")
-                        .value_delimiter(',')
-                        .num_args(1..)
-                        .required(true)
-                        .help("Recipe URL(s) or file path(s)"),
-                ),
-        )
-        .get_matches();
+    let config = McpServerConfig::builder()
+        .name("brim")
+        .version(env!("CARGO_PKG_VERSION"))
+        .with_tools_from(MacroServerAdapter::new(BrimMcpServer))
+        .build();
 
-    fn urls_from_sub(sub: &ArgMatches) -> Vec<String> {
-        sub.get_many::<String>("urls")
-            .unwrap_or_default()
-            .cloned()
-            .collect()
-    }
-
-    match matches.subcommand() {
-        Some(("install", sub)) => {
-            let urls = urls_from_sub(sub);
-            let parallel = sub
-                .get_one::<String>("parallel")
-                .map(|s| s != "false")
-                .unwrap_or(true);
-            if let Err(e) = run_install(&urls, parallel) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-            Ok(())
-        }
-        Some(("sync", sub)) => {
-            if let Err(e) = run_sync(&urls_from_sub(sub)) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-            Ok(())
-        }
-        Some(("remove", sub)) => {
-            if let Err(e) = run_remove(&urls_from_sub(sub)) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
-            Ok(())
-        }
-        _ => {
-            let config = McpServerConfig::builder()
-                .name("brim")
-                .version(env!("CARGO_PKG_VERSION"))
-                .with_tools_from(MacroServerAdapter::new(BrimMcpServer))
-                .build();
-
-            McpStdioServer::run(config).await?;
-            Ok(())
-        }
-    }
+    McpStdioServer::run(config).await?;
+    Ok(())
 }

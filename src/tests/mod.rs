@@ -54,6 +54,7 @@ mod tests {
             failed: 0,
             packages,
             elapsed_seconds: 120,
+            machine_id: "test-machine".to_string(),
         };
 
         assert_eq!(payload.status, "success");
@@ -82,6 +83,7 @@ mod tests {
             failed: 1,
             packages,
             elapsed_seconds: 120,
+            machine_id: "test-machine".to_string(),
         };
 
         let json = serde_json::to_string(&payload).unwrap();

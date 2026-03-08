@@ -1,6 +1,6 @@
 use std::time::Instant;
 
-use clap::{Arg, Command};
+use clap::{Arg, ArgMatches, Command};
 use console::{style, Color, StyledObject};
 use dialoguer::theme::Theme;
 use dialoguer::{Confirm, MultiSelect};
@@ -8,12 +8,15 @@ use std::fmt;
 
 use brim::fetch_and_merge_packages;
 use brim::models::BrewPackage;
+use brim::sync_analysis;
 use brim::utilities::brew_common;
 use brim::utilities::{
-    brew_install_packages::install_packages, brew_list_installed_packages::list_installed_packages,
-    brew_recipe_lock, brew_remove_packages::remove_packages,
+    brew_install_packages::{install_packages, install_packages_headless},
+    brew_list_installed_packages::list_installed_packages,
+    brew_recipe_lock,
+    brew_remove_packages::{remove_packages, remove_packages_headless},
 };
-use brim::webhook::{post_webhook, WebhookPayload};
+use brim::webhook::{default_machine_id, post_webhook, WebhookPayload};
 use brim::LockError;
 
 #[cfg(test)]
@@ -34,6 +37,14 @@ fn print_header(title: &str, color: Color) {
     println!("{}", style(bottom).fg(color).bold());
 }
 
+/// Collect comma-separated or repeated `--urls` values from a subcommand match.
+fn collect_urls(sub: &ArgMatches) -> Vec<String> {
+    sub.get_many::<String>("urls")
+        .unwrap_or_default()
+        .cloned()
+        .collect()
+}
+
 #[tokio::main]
 async fn main() {
     let start_time = Instant::now();
@@ -41,6 +52,9 @@ async fn main() {
     let matches = Command::new("BRIM")
         .version(env!("CARGO_PKG_VERSION"))
         .disable_version_flag(true)
+        .subcommand_required(false)
+        .arg_required_else_help(false)
+        // ── TUI mode flags (no subcommand) ──────────────────────────────────
         .arg(
             Arg::new("version")
                 .short('v')
@@ -86,6 +100,12 @@ async fn main() {
                 .help("Webhook URL to post installation summary (optional)"),
         )
         .arg(
+            Arg::new("webhook-machine-id")
+                .long("webhook-machine-id")
+                .value_name("ID")
+                .help("Machine ID sent in webhook payload (default: hostname from env or \"unknown\")"),
+        )
+        .arg(
             Arg::new("dry-run")
                 .long("dry-run")
                 .action(clap::ArgAction::SetTrue)
@@ -98,8 +118,327 @@ async fn main() {
                 .num_args(1)
                 .help("Auto-quit summary screen after N seconds (after install)"),
         )
+        // ── Headless subcommands ─────────────────────────────────────────────
+        .subcommand(
+            Command::new("install")
+                .about("Install packages from recipe URL(s) without TUI. Lock is verified; use update-lock to accept changes.")
+                .arg(
+                    Arg::new("urls")
+                        .short('u')
+                        .long("urls")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .required(true)
+                        .help("Recipe URL(s) or file path(s)"),
+                )
+                .arg(
+                    Arg::new("parallel")
+                        .short('p')
+                        .long("parallel")
+                        .action(clap::ArgAction::SetTrue)
+                        .help("Parallel fetch, sequential install"),
+                )
+                .arg(
+                    Arg::new("webhook")
+                        .long("webhook")
+                        .value_name("URL")
+                        .help("Webhook URL to POST install summary"),
+                )
+                .arg(
+                    Arg::new("webhook-machine-id")
+                        .long("webhook-machine-id")
+                        .value_name("ID")
+                        .help("Machine ID in webhook payload (default: hostname or \"unknown\")"),
+                ),
+        )
+        .subcommand(
+            Command::new("sync")
+                .about("Compare recipe with installed packages; show to_install / to_remove / in_sync.")
+                .arg(
+                    Arg::new("urls")
+                        .short('u')
+                        .long("urls")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .required(true)
+                        .help("Recipe URL(s) or file path(s)"),
+                ),
+        )
+        .subcommand(
+            Command::new("remove")
+                .about("Remove packages: by name (--packages) or by recipe (--urls removes extras not in recipe).")
+                .arg(
+                    Arg::new("urls")
+                        .short('u')
+                        .long("urls")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .help("Recipe URL(s); remove packages not in recipe (extras)"),
+                )
+                .arg(
+                    Arg::new("packages")
+                        .short('n')
+                        .long("packages")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .help("Package name(s) to remove (e.g. wget,jq)"),
+                )
+                .group(
+                    clap::ArgGroup::new("remove_mode")
+                        .args(["urls", "packages"])
+                        .required(true)
+                        .multiple(false),
+                ),
+        )
+        .subcommand(
+            Command::new("update-lock")
+                .about("Accept current recipe and update lockfile. Use after changing recipe so sync/install can proceed.")
+                .arg(
+                    Arg::new("urls")
+                        .short('u')
+                        .long("urls")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .required(true)
+                        .help("Recipe URL(s) or file path(s)"),
+                ),
+        )
         .get_matches();
 
+    match matches.subcommand() {
+        Some(("install", sub)) => {
+            run_install_headless(sub, start_time).await;
+        }
+        Some(("sync", sub)) => {
+            run_sync_headless(sub).await;
+        }
+        Some(("remove", sub)) => {
+            run_remove_headless(sub).await;
+        }
+        Some(("update-lock", sub)) => {
+            run_update_lock_headless(sub).await;
+        }
+        _ => {
+            run_tui(&matches, start_time).await;
+        }
+    }
+}
+
+// ── Headless subcommand handlers ──────────────────────────────────────────────
+
+async fn run_install_headless(sub: &ArgMatches, start_time: Instant) {
+    let urls = collect_urls(sub);
+    let parallel = sub.get_flag("parallel");
+    let webhook_url = sub.get_one::<String>("webhook").cloned();
+    let machine_id_opt = sub.get_one::<String>("webhook-machine-id").cloned();
+
+    println!("\n{} Fetching recipe...", style("→").cyan().bold());
+    let packages = match fetch_and_merge_packages(&urls).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = brew_recipe_lock::verify_or_update_lock(&packages, &urls) {
+        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
+        std::process::exit(1);
+    }
+
+    println!("{} Installing {} package(s)...", style("→").cyan().bold(), packages.len());
+    let results = install_packages_headless(&packages, parallel);
+
+    let completed = results.iter().filter(|r| r.status == "completed").count();
+    let failed = results.iter().filter(|r| r.status == "failed").count();
+
+    for r in &results {
+        let icon = if r.status == "completed" {
+            style("✓").green().bold()
+        } else {
+            style("✗").red().bold()
+        };
+        println!("  {} {}", icon, r.name);
+    }
+
+    let summary_icon = if failed == 0 {
+        style("✓").green().bold()
+    } else {
+        style("⚠").yellow().bold()
+    };
+    println!(
+        "\n{} Done in {}s — {} completed, {} failed.",
+        summary_icon,
+        start_time.elapsed().as_secs(),
+        completed,
+        failed
+    );
+
+    if let Some(url) = webhook_url {
+        let machine_id = machine_id_opt.unwrap_or_else(default_machine_id);
+        let payload = WebhookPayload {
+            status: if failed > 0 { "partial".to_string() } else { "success".to_string() },
+            total: results.len(),
+            completed,
+            failed,
+            packages: results,
+            elapsed_seconds: start_time.elapsed().as_secs(),
+            machine_id,
+        };
+        match post_webhook(&url, payload).await {
+            Ok(_) => println!("{} Webhook sent.", style("✓").green()),
+            Err(e) => eprintln!("{} Webhook failed: {}", style("⚠").yellow(), e),
+        }
+    }
+}
+
+async fn run_sync_headless(sub: &ArgMatches) {
+    let urls = collect_urls(sub);
+
+    println!("\n{} Fetching recipe...", style("→").cyan().bold());
+    let recipe = match fetch_and_merge_packages(&urls).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
+        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
+        std::process::exit(1);
+    }
+
+    let installed = list_installed_packages();
+    let report = sync_analysis(&recipe, &installed);
+
+    println!("\n{} Sync analysis (recipe vs installed):", style("→").cyan().bold());
+    println!("  {} In sync:     {}", style("✓").green(), style(report.in_sync.len()).cyan().bold());
+    println!("  {} To install:  {}", style("+").green(), style(report.to_install.len()).cyan().bold());
+    println!("  {} To remove:   {}", style("-").red(), style(report.to_remove.len()).cyan().bold());
+
+    if !report.to_install.is_empty() {
+        println!("\n{}", style("Packages to install:").green().bold());
+        for p in &report.to_install {
+            println!("  {} {}", style("+").green().bold(), p.name);
+        }
+    }
+    if !report.to_remove.is_empty() {
+        println!("\n{}", style("Extra packages (not in recipe):").yellow().bold());
+        for p in &report.to_remove {
+            println!("  {} {}", style("-").yellow().bold(), p.name);
+        }
+    }
+    if report.to_install.is_empty() && report.to_remove.is_empty() {
+        println!("\n{} All packages are in sync!", style("✓").green().bold());
+    }
+}
+
+async fn run_remove_headless(sub: &ArgMatches) {
+    let names: Vec<String> = sub
+        .get_many::<String>("packages")
+        .unwrap_or_default()
+        .cloned()
+        .collect();
+
+    let packages_to_remove: Vec<BrewPackage> = if !names.is_empty() {
+        names
+            .into_iter()
+            .map(|name| BrewPackage { name, category: None, url: None, cask: None, version: None })
+            .collect()
+    } else {
+        let urls = collect_urls(sub);
+        println!("\n{} Fetching recipe...", style("→").cyan().bold());
+        let recipe = match fetch_and_merge_packages(&urls).await {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+                eprintln!("  {}", e);
+                std::process::exit(1);
+            }
+        };
+        if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
+            eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+            eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
+            std::process::exit(1);
+        }
+        let installed = list_installed_packages();
+        let report = sync_analysis(&recipe, &installed);
+        if report.to_remove.is_empty() {
+            println!("{} Nothing to remove — all installed packages are in the recipe.", style("✓").green().bold());
+            return;
+        }
+        println!(
+            "{} Removing {} package(s) not in recipe: {}",
+            style("→").cyan().bold(),
+            report.to_remove.len(),
+            report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+        );
+        report.to_remove
+    };
+
+    let start = Instant::now();
+    let results = remove_packages_headless(&packages_to_remove);
+    let completed = results.iter().filter(|r| r.status == "completed").count();
+    let failed = results.iter().filter(|r| r.status == "failed").count();
+
+    for r in &results {
+        let icon = if r.status == "completed" {
+            style("✓").green().bold()
+        } else {
+            style("✗").red().bold()
+        };
+        println!("  {} {}", icon, r.name);
+    }
+
+    let summary_icon = if failed == 0 {
+        style("✓").green().bold()
+    } else {
+        style("⚠").yellow().bold()
+    };
+    println!(
+        "\n{} Done in {}s — {} removed, {} failed.",
+        summary_icon,
+        start.elapsed().as_secs(),
+        completed,
+        failed
+    );
+}
+
+async fn run_update_lock_headless(sub: &ArgMatches) {
+    let urls = collect_urls(sub);
+
+    println!("\n{} Fetching recipe...", style("→").cyan().bold());
+    let packages = match fetch_and_merge_packages(&urls).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match brew_recipe_lock::update_lock(&packages, &urls) {
+        Ok(()) => println!(
+            "{} Recipe lock updated for {} package(s).",
+            style("✓").green().bold(),
+            packages.len()
+        ),
+        Err(e) => {
+            eprintln!("\n{} {}", style("✗").red().bold(), style("Failed to update lock").red().bold());
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+// ── TUI mode (no subcommand) ──────────────────────────────────────────────────
+
+async fn run_tui(matches: &ArgMatches, start_time: Instant) {
     let installed_packages = list_installed_packages();
 
     if let Some(urls) = matches.get_many::<String>("url") {
@@ -300,6 +639,10 @@ async fn main() {
                     if let Some(url) = webhook_url {
                         let completed = results.iter().filter(|r| r.status == "completed").count();
                         let failed = results.iter().filter(|r| r.status == "failed").count();
+                        let machine_id = matches
+                            .get_one::<String>("webhook-machine-id")
+                            .cloned()
+                            .unwrap_or_else(default_machine_id);
 
                         let payload = WebhookPayload {
                             status: if failed > 0 {
@@ -312,6 +655,7 @@ async fn main() {
                             failed,
                             packages: results,
                             elapsed_seconds: start_time.elapsed().as_secs(),
+                            machine_id,
                         };
 
                         match post_webhook(&url, payload).await {
@@ -417,6 +761,10 @@ async fn main() {
             if let Some(url) = webhook_url {
                 let completed = results.iter().filter(|r| r.status == "completed").count();
                 let failed = results.iter().filter(|r| r.status == "failed").count();
+                let machine_id = matches
+                    .get_one::<String>("webhook-machine-id")
+                    .cloned()
+                    .unwrap_or_else(default_machine_id);
 
                 let payload = WebhookPayload {
                     status: if failed > 0 {
@@ -429,6 +777,7 @@ async fn main() {
                     failed,
                     packages: results,
                     elapsed_seconds: start_time.elapsed().as_secs(),
+                    machine_id,
                 };
 
                 match post_webhook(&url, payload).await {

@@ -94,12 +94,15 @@ fn recipe_identity(recipe_sources: &[String]) -> Result<String, LockError> {
 
 /// SHA-256 hash of (recipe identity + content). Identity is location (file/url), path/URL, and order.
 /// Same content from a different file or URL produces a different hash.
+/// Packages are sorted by name so hash is stable regardless of fetch order.
 pub fn recipe_content_hash(
     packages: &[BrewPackage],
     recipe_sources: &[String],
 ) -> Result<String, LockError> {
     let identity = recipe_identity(recipe_sources)?;
-    let canonical = canonical_recipe_json(packages).map_err(|e| LockError::Parse(e.to_string()))?;
+    let mut sorted: Vec<BrewPackage> = packages.to_vec();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    let canonical = canonical_recipe_json(&sorted).map_err(|e| LockError::Parse(e.to_string()))?;
     let mut hasher = Sha256::new();
     hasher.update(identity.as_bytes());
     hasher.update(b"\n");
