@@ -1,12 +1,14 @@
+<p align="center">
+  <a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
+    <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
+  </a>
+</p>
+
 # BRIM
+The declarative package layer for Homebrew. Define your packages in a recipe, host it anywhere, and let brim handle sync, integrity, and installation with a TUI or headless, in a single binary or an MCP server.
+[Website](https://brim.run)
 
 [![Rust](https://github.com/brim-run/brim/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/brim-run/brim/actions/workflows/rust.yml)
-
-<a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
-  <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
-</a>
-
-BRIM (Brew Remote Install Manager) is a CLI for managing Homebrew packages with a TUI, plus an MCP server and headless API for scripts and AI clients.
 
 ## Features
 
