@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # BRIM Installation Script
-# Usage: curl -fsSL https://raw.githubusercontent.com/alexandrughinea/brim/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/brim-run/brim/main/install.sh | bash
 
 set -e
 
@@ -12,7 +12,7 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # Configuration
-REPO="alexandrughinea/brim"
+REPO="brim-run/brim"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
 # Functions

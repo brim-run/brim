@@ -1,6 +1,6 @@
 # BRIM
 
-[![Rust](https://github.com/alexandrughinea/brim/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/alexandrughinea/brim/actions/workflows/rust.yml)
+[![Rust](https://github.com/brim-run/brim/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/brim-run/brim/actions/workflows/rust.yml)
 
 <a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
   <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
@@ -26,15 +26,15 @@ BRIM (Brew Remote Install Manager) is a CLI for managing Homebrew packages with 
 
 **Quick (macOS/Linux):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/alexandrughinea/brim/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/brim-run/brim/main/install.sh | bash
 ```
 Installs `brim` and `brim-mcp` to `~/.local/bin`. Add that directory to PATH if needed.
 
-**Manual:** Download binaries from [releases](https://github.com/alexandrughinea/brim/releases). Extract and move `brim` and `brim-mcp` to a directory on PATH.
+**Manual:** Download binaries from [releases](https://github.com/brim-run/brim/releases). Extract and move `brim` and `brim-mcp` to a directory on PATH.
 
 **From source:**
 ```bash
-git clone https://github.com/alexandrughinea/brim && cd brim
+git clone https://github.com/brim-run/brim && cd brim
 cargo build --release
 # MCP binary (optional)
 cargo build --release --features mcp --bin brim-mcp
@@ -181,10 +181,6 @@ Multiple URLs: use `fetch_and_merge_packages(&urls).await` (returns `Result<Reci
 
 Progress bars and package states (downloading, installing, completed, failed). Color: formulae vs casks, state. Keys: Space (toggle), Enter (confirm), q (quit), ESC (force quit). `--autoquit N` exits summary after N seconds.
 
-## Technical details
-
-Rust 2021, ratatui, crossterm, tokio, reqwest. Timeouts: fetch 2 min/package, install 3 min/package, webhook 10 s.
-
 ## Troubleshooting
 
 - Stuck on "Fetching": ESC to quit; retry without `--parallel` if needed.
@@ -193,12 +189,8 @@ Rust 2021, ratatui, crossterm, tokio, reqwest. Timeouts: fetch 2 min/package, in
 
 ## Contributing
 
-Issues and pull requests: [GitHub](https://github.com/alexandrughinea/brim).
+Issues and pull requests: [GitHub](https://github.com/brim-run/brim).
 
 ## License
 
 Apache 2.0
-
-## Author
-
-Alex Ghinea - [alexandrughinea.dev+brim@gmail.com](mailto:alexandrughinea.dev+brim@gmail.com)

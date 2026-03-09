@@ -8,8 +8,8 @@ default-run = "brim"
 authors = ["Alex Ghinea <alexandrughinea.dev+brim@gmail.com>"]
 description = "A hassle-free tool for effortless installations. Enjoy seamless, customized integration with self managed remote lists, eliminating manual setup."
 license = "Apache 2.0"
-repository = "https://github.com/alexandrughinea/brim"
-homepage = "https://github.com/alexandrughinea/brim"
+repository = "https://github.com/brim-run/brim"
+homepage = "https://github.com/brim-run/brim"
 keywords = ["rust", "cli", "brim"]
 categories = ["command-line-utilities"]
 
