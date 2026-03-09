@@ -181,10 +181,6 @@ Multiple URLs: use `fetch_and_merge_packages(&urls).await` (returns `Result<Reci
 
 Progress bars and package states (downloading, installing, completed, failed). Color: formulae vs casks, state. Keys: Space (toggle), Enter (confirm), q (quit), ESC (force quit). `--autoquit N` exits summary after N seconds.
 
-## Technical details
-
-Rust 2021, ratatui, crossterm, tokio, reqwest. Timeouts: fetch 2 min/package, install 3 min/package, webhook 10 s.
-
 ## Troubleshooting
 
 - Stuck on "Fetching": ESC to quit; retry without `--parallel` if needed.
@@ -198,7 +194,3 @@ Issues and pull requests: [GitHub](https://github.com/alexandrughinea/brim).
 ## License
 
 Apache 2.0
-
-## Author
-
-Alex Ghinea - [alexandrughinea.dev+brim@gmail.com](mailto:alexandrughinea.dev+brim@gmail.com)
