@@ -4,7 +4,7 @@
 //! on stdin/stdout. Configure your client with `"command": "brim-mcp"`.
 //!
 //! For scripted/CI use without an MCP client, use the `brim` headless subcommands instead:
-//! `brim install`, `brim sync`, `brim remove`, `brim update-lock`.
+//! `brim install`, `brim sync`, `brim remove`, `brim trim`, `brim update-lock`.
 
 use brim::{
     fetch_and_merge_packages, install_packages_headless, list_installed_packages,
@@ -146,6 +146,42 @@ impl BrimMcpServer {
             })
             .collect();
         let results = remove_packages_headless(&packages);
+        serde_json::to_string(&results).map_err(|e| e.to_string())
+    }
+
+    #[mcp_tool(
+        description = "Remove all packages listed in the recipe (opposite of install). Fetches and merges the recipe, verifies the lockfile, then removes every recipe package that is currently installed. Use update_recipe_lock first if the recipe has changed."
+    )]
+    pub fn remove_recipe(
+        &self,
+        #[param("JSON array of recipe URLs or file paths")] urls_json: String,
+    ) -> Result<String, String> {
+        let urls = parse_urls_json(&urls_json)?;
+        let recipe = fetch_recipe_verified(&urls)?;
+        let installed = brim::list_installed_packages();
+        let report = brim::sync_analysis(&recipe, &installed);
+        if report.in_sync.is_empty() {
+            return Ok("Nothing to remove — no recipe packages are currently installed.".to_string());
+        }
+        let results = remove_packages_headless(&report.in_sync);
+        serde_json::to_string(&results).map_err(|e| e.to_string())
+    }
+
+    #[mcp_tool(
+        description = "Remove installed packages that are NOT in the recipe (trim extras). Fetches and merges the recipe, verifies the lockfile, then removes everything installed that has no match in the recipe. Use update_recipe_lock first if the recipe has changed."
+    )]
+    pub fn trim(
+        &self,
+        #[param("JSON array of recipe URLs or file paths")] urls_json: String,
+    ) -> Result<String, String> {
+        let urls = parse_urls_json(&urls_json)?;
+        let recipe = fetch_recipe_verified(&urls)?;
+        let installed = brim::list_installed_packages();
+        let report = brim::sync_analysis(&recipe, &installed);
+        if report.to_remove.is_empty() {
+            return Ok("Nothing to trim — all installed packages are in the recipe.".to_string());
+        }
+        let results = remove_packages_headless(&report.to_remove);
         serde_json::to_string(&results).map_err(|e| e.to_string())
     }
 }

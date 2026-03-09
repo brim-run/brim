@@ -166,14 +166,14 @@ async fn main() {
         )
         .subcommand(
             Command::new("remove")
-                .about("Remove packages: by name (--packages) or by recipe (--urls removes extras not in recipe).")
+                .about("Remove packages: by name (--packages) or all packages listed in a recipe (--urls, opposite of install).")
                 .arg(
                     Arg::new("urls")
                         .short('u')
                         .long("urls")
                         .value_delimiter(',')
                         .num_args(1..)
-                        .help("Recipe URL(s); remove packages not in recipe (extras)"),
+                        .help("Recipe URL(s); remove all packages listed in the recipe"),
                 )
                 .arg(
                     Arg::new("packages")
@@ -188,6 +188,19 @@ async fn main() {
                         .args(["urls", "packages"])
                         .required(true)
                         .multiple(false),
+                ),
+        )
+        .subcommand(
+            Command::new("trim")
+                .about("Remove installed packages that are not listed in the recipe (clean up extras).")
+                .arg(
+                    Arg::new("urls")
+                        .short('u')
+                        .long("urls")
+                        .value_delimiter(',')
+                        .num_args(1..)
+                        .required(true)
+                        .help("Recipe URL(s) or file path(s); extras not in recipe will be removed"),
                 ),
         )
         .subcommand(
@@ -214,6 +227,9 @@ async fn main() {
         }
         Some(("remove", sub)) => {
             run_remove_headless(sub).await;
+        }
+        Some(("trim", sub)) => {
+            run_trim_headless(sub).await;
         }
         Some(("update-lock", sub)) => {
             run_update_lock_headless(sub).await;
@@ -368,21 +384,56 @@ async fn run_remove_headless(sub: &ArgMatches) {
         }
         let installed = list_installed_packages();
         let report = sync_analysis(&recipe, &installed);
-        if report.to_remove.is_empty() {
-            println!("{} Nothing to remove — all installed packages are in the recipe.", style("✓").green().bold());
+        if report.in_sync.is_empty() {
+            println!("{} Nothing to remove — no recipe packages are currently installed.", style("✓").green().bold());
             return;
         }
         println!(
-            "{} Removing {} package(s) not in recipe: {}",
+            "{} Removing {} recipe package(s): {}",
             style("→").cyan().bold(),
-            report.to_remove.len(),
-            report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+            report.in_sync.len(),
+            report.in_sync.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
         );
-        report.to_remove
+        report.in_sync
     };
 
+    print_remove_results(packages_to_remove).await;
+}
+
+async fn run_trim_headless(sub: &ArgMatches) {
+    let urls = collect_urls(sub);
+    println!("\n{} Fetching recipe...", style("→").cyan().bold());
+    let recipe = match fetch_and_merge_packages(&urls).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    };
+    if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
+        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
+        std::process::exit(1);
+    }
+    let installed = list_installed_packages();
+    let report = sync_analysis(&recipe, &installed);
+    if report.to_remove.is_empty() {
+        println!("{} Nothing to trim — all installed packages are in the recipe.", style("✓").green().bold());
+        return;
+    }
+    println!(
+        "{} Trimming {} package(s) not in recipe: {}",
+        style("→").cyan().bold(),
+        report.to_remove.len(),
+        report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+    );
+    print_remove_results(report.to_remove).await;
+}
+
+async fn print_remove_results(packages: Vec<BrewPackage>) {
     let start = Instant::now();
-    let results = remove_packages_headless(&packages_to_remove);
+    let results = remove_packages_headless(&packages);
     let completed = results.iter().filter(|r| r.status == "completed").count();
     let failed = results.iter().filter(|r| r.status == "failed").count();
 

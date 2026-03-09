@@ -1,12 +1,14 @@
+<p align="center">
+  <a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
+    <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
+  </a>
+</p>
+
 # BRIM
+The declarative package layer for Homebrew. Define your packages in a recipe, host it anywhere, and let brim handle sync, integrity, and installation with a TUI or headless, in a single binary or an MCP server.
+[Website](https://brim.run)
 
 [![Rust](https://github.com/brim-run/brim/actions/workflows/rust.yml/badge.svg?branch=main)](https://github.com/brim-run/brim/actions/workflows/rust.yml)
-
-<a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
-  <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
-</a>
-
-BRIM (Brew Remote Install Manager) is a CLI for managing Homebrew packages with a TUI, plus an MCP server and headless API for scripts and AI clients.
 
 ## Features
 
@@ -81,6 +83,7 @@ brim install --urls recipe.json --webhook="https://example.com/hook"
 brim sync    --urls recipe.json
 brim remove  --packages wget,jq
 brim remove  --urls recipe.json
+brim trim    --urls recipe.json
 brim update-lock --urls recipe.json
 ```
 
@@ -88,7 +91,8 @@ brim update-lock --urls recipe.json
 |------------|----------|----------|-------------|
 | `install` | `--urls` | `--parallel`, `--webhook`, `--webhook-machine-id` | Install packages from recipe |
 | `sync` | `--urls` | — | Show to_install / to_remove / in_sync |
-| `remove` | `--packages` OR `--urls` | — | Remove by name, or remove extras not in recipe |
+| `remove` | `--packages` OR `--urls` | — | Remove by name, or remove all packages listed in the recipe (opposite of install) |
+| `trim` | `--urls` | — | Remove installed packages not in the recipe (clean up extras) |
 | `update-lock` | `--urls` | — | Accept recipe changes and update lockfile |
 
 ## MCP server (brim-mcp)
@@ -104,7 +108,9 @@ Run with no arguments to start the stdio MCP server. Configure your client with 
 | list_recipe_packages | Fetch and merge recipe URL(s); return merged package list |
 | sync_analysis_tool | Compare recipe vs installed; return to_install, to_remove, in_sync |
 | install | Install from recipe URL(s); optional webhook_url, webhook_machine_id, parallel |
-| remove | Remove packages by name (JSON array); e.g. names from sync to_remove |
+| remove | Remove packages by name (JSON array) |
+| remove_recipe | Remove all packages listed in the recipe (opposite of install) |
+| trim | Remove installed packages not in the recipe (clean up extras) |
 
 **Config (Cursor):** `~/.cursor/mcp.json` or Settings > Tools & MCP. **Claude Desktop:** e.g. `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS). Add:
 ```json
