@@ -1,0 +1,11 @@
+[
+    {
+        "name": "wget",
+        "category": "Network"
+    },
+    {
+        "name": "iterm2",
+        "category": "Terminal",
+        "cask": true
+    }
+]

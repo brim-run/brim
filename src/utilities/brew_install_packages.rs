@@ -9,12 +9,36 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
+/// Best-effort sudo pre-authentication for the TUI path only.
+/// Limitation: since Homebrew 4.3 (2024) every `brew` invocation calls
+/// `sudo --reset-timestamp`, which invalidates whatever we cached here before
+/// brew reaches the point where it needs the password. This is a known
+/// Homebrew WONTFIX. The headless path avoids this entirely by inheriting
+/// stdin directly, which lets brew prompt on its own.
+fn pre_authenticate_if_needed(packages: &[BrewPackage]) {
+    if !packages.iter().any(|p| p.cask.is_some()) {
+        return;
+    }
+
+    eprintln!("\nSome cask packages may require administrator privileges.");
+    eprintln!("Pre-authenticating sudo so the TUI is not interrupted...\n");
+
+    let _ = Command::new("sudo")
+        .arg("-v")
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status();
+}
+
 pub fn install_packages(
     packages: &[BrewPackage],
     parallel: bool,
     autoquit_secs: Option<u64>,
 ) -> Vec<BrewPackageResult> {
     let package_names: Vec<String> = packages.iter().map(|p| p.name.clone()).collect();
+
+    pre_authenticate_if_needed(packages);
 
     let mut tracker = match ProgressTracker::new(package_names, autoquit_secs) {
         Ok(t) => t,
@@ -113,12 +137,15 @@ pub fn install_packages_headless(
 fn run_one_install_headless(package: &BrewPackage) -> BrewPackageResult {
     let spec = super::brew_common::brew_package_spec(package);
     let mut command = Command::new(PROGRAM);
+
     command.arg("install").arg(&spec);
+
     if package.cask.is_some() {
         command.arg("--cask");
     }
+
     command
-        .stdin(Stdio::null())
+        .stdin(Stdio::inherit())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
