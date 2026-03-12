@@ -151,7 +151,7 @@ verify_installation() {
 main() {
     echo ""
     echo "╔═══════════════════════════════════════════════════════════════════╗"
-    echo "║         BRIM - Brew Remote Install Manager                       ║"
+    echo "║         BRIM - Brew Recipe Install Manager                        ║"
     echo "╚═══════════════════════════════════════════════════════════════════╝"
     echo ""
     
