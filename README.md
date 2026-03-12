@@ -1,6 +1,6 @@
 <p align="center">
-  <a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
-    <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
+  <a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Recipe Install Manager)">
+    <img src=".fixtures/logo.svg" alt="BRIM (Brew Recipe Install Manager)" width="256px">
   </a>
 </p>
 

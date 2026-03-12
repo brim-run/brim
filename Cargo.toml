@@ -6,7 +6,7 @@ default-run = "brim"
 
 # Additional metadata
 authors = ["Alex Ghinea <alexandrughinea.dev+brim@gmail.com>"]
-description = "A hassle-free tool for effortless installations. Enjoy seamless, customized integration with self managed remote lists, eliminating manual setup."
+description = "A hassle-free tool for effortless installations. Enjoy seamless, customized integration with self managed recipe lists, eliminating manual setup."
 license = "Apache 2.0"
 repository = "https://github.com/brim-run/brim"
 homepage = "https://github.com/brim-run/brim"

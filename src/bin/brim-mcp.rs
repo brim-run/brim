@@ -81,7 +81,9 @@ impl BrimMcpServer {
         #[param("Use parallel fetch then sequential install")] parallel: bool,
         #[param("Optional webhook URL to POST install summary (empty to skip)")]
         webhook_url: String,
-        #[param("Optional machine ID for webhook payload (empty = default: hostname or \"unknown\")")]
+        #[param(
+            "Optional machine ID for webhook payload (empty = default: hostname or \"unknown\")"
+        )]
         webhook_machine_id: String,
     ) -> Result<String, String> {
         let urls = parse_urls_json(&urls_json)?;
@@ -161,7 +163,9 @@ impl BrimMcpServer {
         let installed = brim::list_installed_packages();
         let report = brim::sync_analysis(&recipe, &installed);
         if report.in_sync.is_empty() {
-            return Ok("Nothing to remove — no recipe packages are currently installed.".to_string());
+            return Ok(
+                "Nothing to remove — no recipe packages are currently installed.".to_string(),
+            );
         }
         let results = remove_packages_headless(&report.in_sync);
         serde_json::to_string(&results).map_err(|e| e.to_string())
@@ -188,8 +192,7 @@ impl BrimMcpServer {
 
 /// Parse JSON array of recipe URLs/paths. Shared by all tools that take urls_json.
 fn parse_urls_json(urls_json: &str) -> Result<Vec<String>, String> {
-    serde_json::from_str(urls_json.trim())
-        .map_err(|e| format!("Invalid JSON array of URLs: {}", e))
+    serde_json::from_str(urls_json.trim()).map_err(|e| format!("Invalid JSON array of URLs: {}", e))
 }
 
 /// Fetch recipe (no lock check). Used by fetch_recipe_verified and update_recipe_lock.

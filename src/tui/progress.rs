@@ -317,7 +317,7 @@ impl ProgressTracker {
             ])
             .split(f.area());
         let (top, middle, bottom) =
-            crate::utilities::brew_common::header_lines("Brew Remote Install Manager");
+            crate::utilities::brew_common::header_lines("Brew Recipe Install Manager");
         let title = Paragraph::new(vec![
             Line::from(vec![Span::styled(
                 top,
@@ -529,5 +529,26 @@ impl Drop for ProgressTracker {
     fn drop(&mut self) {
         let _ = disable_raw_mode();
         let _ = execute!(self.terminal.backend_mut(), LeaveAlternateScreen);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn package_progress_new_starts_pending() {
+        let p = PackageProgress::new("wget".to_string());
+        assert_eq!(p.state, ProgressState::Pending);
+        assert_eq!(p.progress, 0);
+        assert_eq!(p.name, "wget");
+    }
+
+    #[test]
+    fn package_progress_completed_state_label() {
+        let mut p = PackageProgress::new("wget".to_string());
+        p.state = ProgressState::Completed;
+        p.progress = 100;
+        assert_eq!(p.state_label(), "completed");
     }
 }

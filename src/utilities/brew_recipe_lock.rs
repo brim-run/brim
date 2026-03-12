@@ -123,11 +123,7 @@ fn lock_filename(recipe_sources: &[String]) -> Result<String, LockError> {
     let identity = recipe_identity(recipe_sources)?;
     let mut hasher = Sha256::new();
     hasher.update(identity.as_bytes());
-    Ok(format!(
-        "{}{:x}.lock",
-        LOCK_FILE_PREFIX,
-        hasher.finalize()
-    ))
+    Ok(format!("{}{:x}.lock", LOCK_FILE_PREFIX, hasher.finalize()))
 }
 
 /// Lockfile path: next to the brim binary, one file per recipe (filename = hash of recipe identity).
@@ -249,5 +245,16 @@ mod tests {
             recipe_content_hash(&packages, &["https://example.com/recipe.json".to_string()])
                 .unwrap();
         assert_ne!(h_file, h_url, "file vs url should produce different hashes");
+    }
+
+    #[test]
+    fn write_and_read_lock_roundtrip() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("brim_test_lock_roundtrip.lock");
+        let hash = "deadbeefcafe1234";
+        write_lock(&path, hash).unwrap();
+        let stored = read_lock(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(stored, Some(hash.to_string()));
     }
 }

@@ -1,9 +1,9 @@
 # 
 # BRIM Roadmap
-#### (home)Brew Remote Install Manager roadmap outline
+#### (home)Brew Recipe Install Manager roadmap outline
 
-<a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Remote Install Manager)">
-  <img src=".fixtures/logo.svg" alt="BRIM (Brew Remote Install Manager)" width="256px">
+<a href="https://www.buymeacoffee.com/alexandrughinea" title="BRIM (Brew Recipe Install Manager)">
+  <img src=".fixtures/logo.svg" alt="BRIM (Brew Recipe Install Manager)" width="256px">
 </a>
 
 ### Public release: v0.2.0

@@ -252,19 +252,31 @@ async fn run_install_headless(sub: &ArgMatches, start_time: Instant) {
     let packages = match fetch_and_merge_packages(&urls).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style("Error fetching recipe").red().bold()
+            );
             eprintln!("  {}", e);
             std::process::exit(1);
         }
     };
 
     if let Err(e) = brew_recipe_lock::verify_or_update_lock(&packages, &urls) {
-        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!(
+            "\n{} {}",
+            style("✗").red().bold(),
+            style(e.to_string()).red()
+        );
         eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
         std::process::exit(1);
     }
 
-    println!("{} Installing {} package(s)...", style("→").cyan().bold(), packages.len());
+    println!(
+        "{} Installing {} package(s)...",
+        style("→").cyan().bold(),
+        packages.len()
+    );
     let results = install_packages_headless(&packages, parallel);
 
     let completed = results.iter().filter(|r| r.status == "completed").count();
@@ -295,7 +307,11 @@ async fn run_install_headless(sub: &ArgMatches, start_time: Instant) {
     if let Some(url) = webhook_url {
         let machine_id = machine_id_opt.unwrap_or_else(default_machine_id);
         let payload = WebhookPayload {
-            status: if failed > 0 { "partial".to_string() } else { "success".to_string() },
+            status: if failed > 0 {
+                "partial".to_string()
+            } else {
+                "success".to_string()
+            },
             total: results.len(),
             completed,
             failed,
@@ -317,14 +333,22 @@ async fn run_sync_headless(sub: &ArgMatches) {
     let recipe = match fetch_and_merge_packages(&urls).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style("Error fetching recipe").red().bold()
+            );
             eprintln!("  {}", e);
             std::process::exit(1);
         }
     };
 
     if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
-        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!(
+            "\n{} {}",
+            style("✗").red().bold(),
+            style(e.to_string()).red()
+        );
         eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
         std::process::exit(1);
     }
@@ -332,10 +356,25 @@ async fn run_sync_headless(sub: &ArgMatches) {
     let installed = list_installed_packages();
     let report = sync_analysis(&recipe, &installed);
 
-    println!("\n{} Sync analysis (recipe vs installed):", style("→").cyan().bold());
-    println!("  {} In sync:     {}", style("✓").green(), style(report.in_sync.len()).cyan().bold());
-    println!("  {} To install:  {}", style("+").green(), style(report.to_install.len()).cyan().bold());
-    println!("  {} To remove:   {}", style("-").red(), style(report.to_remove.len()).cyan().bold());
+    println!(
+        "\n{} Sync analysis (recipe vs installed):",
+        style("→").cyan().bold()
+    );
+    println!(
+        "  {} In sync:     {}",
+        style("✓").green(),
+        style(report.in_sync.len()).cyan().bold()
+    );
+    println!(
+        "  {} To install:  {}",
+        style("+").green(),
+        style(report.to_install.len()).cyan().bold()
+    );
+    println!(
+        "  {} To remove:   {}",
+        style("-").red(),
+        style(report.to_remove.len()).cyan().bold()
+    );
 
     if !report.to_install.is_empty() {
         println!("\n{}", style("Packages to install:").green().bold());
@@ -344,7 +383,10 @@ async fn run_sync_headless(sub: &ArgMatches) {
         }
     }
     if !report.to_remove.is_empty() {
-        println!("\n{}", style("Extra packages (not in recipe):").yellow().bold());
+        println!(
+            "\n{}",
+            style("Extra packages (not in recipe):").yellow().bold()
+        );
         for p in &report.to_remove {
             println!("  {} {}", style("-").yellow().bold(), p.name);
         }
@@ -364,7 +406,13 @@ async fn run_remove_headless(sub: &ArgMatches) {
     let packages_to_remove: Vec<BrewPackage> = if !names.is_empty() {
         names
             .into_iter()
-            .map(|name| BrewPackage { name, category: None, url: None, cask: None, version: None })
+            .map(|name| BrewPackage {
+                name,
+                category: None,
+                url: None,
+                cask: None,
+                version: None,
+            })
             .collect()
     } else {
         let urls = collect_urls(sub);
@@ -372,27 +420,43 @@ async fn run_remove_headless(sub: &ArgMatches) {
         let recipe = match fetch_and_merge_packages(&urls).await {
             Ok(p) => p,
             Err(e) => {
-                eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+                eprintln!(
+                    "\n{} {}",
+                    style("✗").red().bold(),
+                    style("Error fetching recipe").red().bold()
+                );
                 eprintln!("  {}", e);
                 std::process::exit(1);
             }
         };
         if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
-            eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style(e.to_string()).red()
+            );
             eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
             std::process::exit(1);
         }
         let installed = list_installed_packages();
         let report = sync_analysis(&recipe, &installed);
         if report.in_sync.is_empty() {
-            println!("{} Nothing to remove — no recipe packages are currently installed.", style("✓").green().bold());
+            println!(
+                "{} Nothing to remove — no recipe packages are currently installed.",
+                style("✓").green().bold()
+            );
             return;
         }
         println!(
             "{} Removing {} recipe package(s): {}",
             style("→").cyan().bold(),
             report.in_sync.len(),
-            report.in_sync.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+            report
+                .in_sync
+                .iter()
+                .map(|p| p.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
         );
         report.in_sync
     };
@@ -406,29 +470,80 @@ async fn run_trim_headless(sub: &ArgMatches) {
     let recipe = match fetch_and_merge_packages(&urls).await {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style("Error fetching recipe").red().bold()
+            );
             eprintln!("  {}", e);
             std::process::exit(1);
         }
     };
     if let Err(e) = brew_recipe_lock::verify_or_update_lock(&recipe, &urls) {
-        eprintln!("\n{} {}", style("✗").red().bold(), style(e.to_string()).red());
+        eprintln!(
+            "\n{} {}",
+            style("✗").red().bold(),
+            style(e.to_string()).red()
+        );
         eprintln!("  Run: brim update-lock --urls {}", urls.join(","));
         std::process::exit(1);
     }
     let installed = list_installed_packages();
     let report = sync_analysis(&recipe, &installed);
     if report.to_remove.is_empty() {
-        println!("{} Nothing to trim — all installed packages are in the recipe.", style("✓").green().bold());
+        println!(
+            "{} Nothing to trim — all installed packages are in the recipe.",
+            style("✓").green().bold()
+        );
         return;
     }
     println!(
         "{} Trimming {} package(s) not in recipe: {}",
         style("→").cyan().bold(),
         report.to_remove.len(),
-        report.to_remove.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+        report
+            .to_remove
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ")
     );
     print_remove_results(report.to_remove).await;
+}
+
+async fn run_update_lock_headless(sub: &ArgMatches) {
+    let urls = collect_urls(sub);
+
+    println!("\n{} Fetching recipe...", style("→").cyan().bold());
+    let packages = match fetch_and_merge_packages(&urls).await {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style("Error fetching recipe").red().bold()
+            );
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    };
+
+    match brew_recipe_lock::update_lock(&packages, &urls) {
+        Ok(()) => println!(
+            "{} Recipe lock updated for {} package(s).",
+            style("✓").green().bold(),
+            packages.len()
+        ),
+        Err(e) => {
+            eprintln!(
+                "\n{} {}",
+                style("✗").red().bold(),
+                style("Failed to update lock").red().bold()
+            );
+            eprintln!("  {}", e);
+            std::process::exit(1);
+        }
+    }
 }
 
 async fn print_remove_results(packages: Vec<BrewPackage>) {
@@ -458,33 +573,6 @@ async fn print_remove_results(packages: Vec<BrewPackage>) {
         completed,
         failed
     );
-}
-
-async fn run_update_lock_headless(sub: &ArgMatches) {
-    let urls = collect_urls(sub);
-
-    println!("\n{} Fetching recipe...", style("→").cyan().bold());
-    let packages = match fetch_and_merge_packages(&urls).await {
-        Ok(p) => p,
-        Err(e) => {
-            eprintln!("\n{} {}", style("✗").red().bold(), style("Error fetching recipe").red().bold());
-            eprintln!("  {}", e);
-            std::process::exit(1);
-        }
-    };
-
-    match brew_recipe_lock::update_lock(&packages, &urls) {
-        Ok(()) => println!(
-            "{} Recipe lock updated for {} package(s).",
-            style("✓").green().bold(),
-            packages.len()
-        ),
-        Err(e) => {
-            eprintln!("\n{} {}", style("✗").red().bold(), style("Failed to update lock").red().bold());
-            eprintln!("  {}", e);
-            std::process::exit(1);
-        }
-    }
 }
 
 // ── TUI mode (no subcommand) ──────────────────────────────────────────────────
@@ -560,7 +648,7 @@ async fn run_tui(matches: &ArgMatches, start_time: Instant) {
                     style("✓").green().bold(),
                     style(packages.len()).cyan().bold()
                 );
-                print_header("Brew Remote Install Manager", Color::Cyan);
+                print_header("Brew Recipe Install Manager", Color::Cyan);
 
                 println!("\n{}", style("Legend:").yellow().bold());
                 println!("  {} Regular package (not installed)", style("◯").green());

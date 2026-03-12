@@ -199,4 +199,16 @@ mod tests {
         assert!(validate_version("1.0.0-").is_err()); // empty pre-release
         assert!(validate_version("a.b.c").is_err());
     }
+
+    #[test]
+    fn test_validate_accepts_cask_package() {
+        let packages = vec![BrewPackage {
+            name: "visual-studio-code".to_string(),
+            category: None,
+            url: None,
+            cask: Some(true),
+            version: None,
+        }];
+        assert!(validate_packages(&packages).is_ok());
+    }
 }

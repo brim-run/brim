@@ -38,3 +38,49 @@ pub async fn fetch_and_merge_packages(urls: &[String]) -> Result<Vec<BrewPackage
 
     Ok(all_packages.into_values().collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::BrewPackage;
+
+    fn pkg(name: &str) -> BrewPackage {
+        BrewPackage {
+            name: name.to_string(),
+            category: None,
+            url: None,
+            cask: None,
+            version: None,
+        }
+    }
+
+    #[test]
+    fn brew_package_spec_appends_version_when_set() {
+        let p = BrewPackage {
+            version: Some("14.0".to_string()),
+            ..pkg("postgresql")
+        };
+        assert_eq!(brew_package_spec(&p), "postgresql@14.0");
+    }
+
+    #[tokio::test]
+    async fn fetch_and_merge_deduplicates_by_name() {
+        let dir = std::env::temp_dir();
+        let p1 = dir.join("brim_test_merge_r1.json");
+        let p2 = dir.join("brim_test_merge_r2.json");
+        std::fs::write(&p1, r#"[{"name":"wget"},{"name":"curl"}]"#).unwrap();
+        std::fs::write(&p2, r#"[{"name":"wget"},{"name":"jq"}]"#).unwrap();
+
+        let urls = vec![
+            p1.to_str().unwrap().to_string(),
+            p2.to_str().unwrap().to_string(),
+        ];
+        let result = fetch_and_merge_packages(&urls).await.unwrap();
+
+        let _ = std::fs::remove_file(p1);
+        let _ = std::fs::remove_file(p2);
+
+        // wget appears in both files; the merged set should have exactly 3 unique packages.
+        assert_eq!(result.len(), 3);
+    }
+}
