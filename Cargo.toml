@@ -1,6 +1,6 @@
 [package]
 name = "brim"
-version = "0.2.0-alpha.3"
+version = "0.2.0-alpha.6"
 edition = "2021"
 default-run = "brim"
 
