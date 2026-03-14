@@ -738,12 +738,23 @@ async fn run_tui(matches: &ArgMatches, start_time: Instant) {
                     })
                     .collect();
                 let package_selections: Vec<usize> =
-                    MultiSelect::with_theme(&MultiSelectThemeNoColon)
+                    match MultiSelect::with_theme(&MultiSelectThemeNoColon)
                         .with_prompt(prompt)
                         .items(&package_option)
                         .defaults(&defaults)
                         .interact()
-                        .unwrap();
+                    {
+                        Ok(sel) => sel,
+                        Err(e) => {
+                            eprintln!(
+                                "\n{} {}",
+                                style("✗").red().bold(),
+                                style("Could not display interactive prompt").red().bold()
+                            );
+                            eprintln!("  {}", e);
+                            std::process::exit(1);
+                        }
+                    };
 
                 let mut selected_packages: Vec<BrewPackage> = vec![];
 
@@ -811,10 +822,12 @@ async fn run_tui(matches: &ArgMatches, start_time: Instant) {
                     style("Error fetching packages").red().bold()
                 );
                 eprintln!("  {}", err);
-                eprintln!(
-                    "\n{} Make sure your URL or file path is correct.",
-                    style("→").yellow()
-                );
+                if !err.is_permission_error() {
+                    eprintln!(
+                        "\n{} Make sure your URL or file path is correct.",
+                        style("→").yellow()
+                    );
+                }
             }
         }
     }
@@ -864,11 +877,23 @@ async fn run_tui(matches: &ArgMatches, start_time: Instant) {
             .iter()
             .map(|package| -> StyledObject<String> { style(format!("✗ {}", package.name)).red() })
             .collect();
-        let package_selections: Vec<usize> = MultiSelect::new()
-            .with_prompt(prompt)
-            .items(&package_option)
-            .interact()
-            .unwrap();
+        let package_selections: Vec<usize> =
+            match MultiSelect::new()
+                .with_prompt(prompt)
+                .items(&package_option)
+                .interact()
+            {
+                Ok(sel) => sel,
+                Err(e) => {
+                    eprintln!(
+                        "\n{} {}",
+                        style("✗").red().bold(),
+                        style("Could not display interactive prompt").red().bold()
+                    );
+                    eprintln!("  {}", e);
+                    std::process::exit(1);
+                }
+            };
 
         let mut selected_packages: Vec<BrewPackage> = vec![];
 
@@ -997,6 +1022,12 @@ async fn run_tui(matches: &ArgMatches, start_time: Instant) {
                         style("Error fetching packages").red().bold()
                     );
                     eprintln!("  {}", err);
+                    if !err.is_permission_error() {
+                        eprintln!(
+                            "\n{} Make sure your URL or file path is correct.",
+                            style("→").yellow()
+                        );
+                    }
                 }
             }
         } else {

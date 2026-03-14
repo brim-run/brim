@@ -18,9 +18,13 @@ pub fn header_lines(title: &str) -> (String, String, String) {
     (top, middle, bottom)
 }
 
-pub async fn fetch_and_merge_packages(urls: &[String]) -> Result<Vec<BrewPackage>, String> {
+pub async fn fetch_and_merge_packages(
+    urls: &[String],
+) -> Result<Vec<BrewPackage>, super::brew_fetch_packages::FetchError> {
+    use super::brew_fetch_packages::FetchError;
+
     if urls.is_empty() {
-        return Err("No URLs provided".to_string());
+        return Err(FetchError::InvalidUrl("No URLs provided".to_string()));
     }
 
     let mut all_packages: HashMap<String, BrewPackage> = HashMap::new();
@@ -32,7 +36,12 @@ pub async fn fetch_and_merge_packages(urls: &[String]) -> Result<Vec<BrewPackage
                     all_packages.insert(package.name.clone(), package);
                 }
             }
-            Err(e) => return Err(format!("Failed to fetch from {}: {}", url, e)),
+            Err(e) => {
+                return Err(FetchError::FetchFailed {
+                    url: url.clone(),
+                    source: Box::new(e),
+                })
+            }
         }
     }
 

@@ -24,7 +24,7 @@ pub async fn fetch_packages(url: &str) -> Result<Vec<BrewPackage>, FetchError> {
 }
 
 /// Fetches and merges multiple recipe URLs/paths. Later entries override earlier ones by package name.
-pub async fn fetch_and_merge_packages(urls: &[String]) -> Result<Recipe, String> {
+pub async fn fetch_and_merge_packages(urls: &[String]) -> Result<Recipe, FetchError> {
     utilities::brew_common::fetch_and_merge_packages(urls).await
 }
 

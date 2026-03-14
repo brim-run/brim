@@ -7,15 +7,44 @@ pub enum FetchError {
     FileError(std::io::Error),
     ParseError(serde_json::Error),
     InvalidUrl(String),
+    FetchFailed { url: String, source: Box<FetchError> },
+}
+
+impl FetchError {
+    pub fn is_permission_error(&self) -> bool {
+        match self {
+            FetchError::FileError(e) => {
+                e.raw_os_error() == Some(1)
+                    || e.kind() == std::io::ErrorKind::PermissionDenied
+            }
+            FetchError::FetchFailed { source, .. } => source.is_permission_error(),
+            _ => false,
+        }
+    }
 }
 
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             FetchError::NetworkError(e) => write!(f, "Network error: {}", e),
-            FetchError::FileError(e) => write!(f, "File error: {}", e),
+            FetchError::FileError(e) => {
+                if self.is_permission_error() {
+                    write!(f, "File error: {}", e)?;
+                    #[cfg(target_os = "macos")]
+                    write!(
+                        f,
+                        "\n  → On macOS, your terminal app may need Full Disk Access.\n  → System Settings → Privacy & Security → Full Disk Access → enable your terminal"
+                    )?;
+                    Ok(())
+                } else {
+                    write!(f, "File error: {}", e)
+                }
+            }
             FetchError::ParseError(e) => write!(f, "JSON parse error: {}", e),
             FetchError::InvalidUrl(s) => write!(f, "Invalid URL or file path: {}", s),
+            FetchError::FetchFailed { url, source } => {
+                write!(f, "Failed to fetch from {}: {}", url, source)
+            }
         }
     }
 }
